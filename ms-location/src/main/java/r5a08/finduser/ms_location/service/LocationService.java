@@ -2,6 +2,7 @@ package r5a08.finduser.ms_location.service;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Sort;
 
 import r5a08.finduser.ms_location.dto.LocationPatchRequest;
 import r5a08.finduser.ms_location.dto.LocationPutRequest;
@@ -29,7 +30,7 @@ public class LocationService {
     /** GET /locations */
     @Transactional(readOnly = true)
     public List<LocationResponse> getAllLocations() {
-        List<Location> locations = this.locationRepository.findAll();
+        List<Location> locations = this.locationRepository.findAll(Sort.by("id"));
 
         return locations.stream()
                 .map(LocationResponse::fromEntity)
