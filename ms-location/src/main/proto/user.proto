@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "r5a08.finduser.grpc.user";
+
+service UserService {
+  rpc GetUser (UserRequest) returns (UserReply);
+}
+
+message UserRequest {
+  string id = 1;
+}
+
+message UserReply {
+  string id = 1;
+  string nom = 2;
+  string prenom = 3;
+  bool exists = 4;
+}

@@ -4,6 +4,10 @@ import org.springframework.grpc.server.service.GrpcService;
 
 import io.grpc.stub.StreamObserver;
 
+import r5a08.finduser.grpc.user.UserReply;
+import r5a08.finduser.grpc.user.UserRequest;
+import r5a08.finduser.grpc.user.UserServiceGrpc;
+
 import r5a08.finduser.ms_user.entity.User;
 import r5a08.finduser.ms_user.service.UserService;
 
