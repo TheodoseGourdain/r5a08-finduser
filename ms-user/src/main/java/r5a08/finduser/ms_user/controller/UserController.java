@@ -2,6 +2,7 @@ package r5a08.finduser.ms_user.controller;
 
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 
 
@@ -53,7 +55,8 @@ public class UserController {
         return ResponseEntity.ok(convert.toDTOUser(user));
     }
 
-    @PostMapping("/create")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/")
     public ResponseEntity<UserDTO> createUser(@RequestBody CreateUserDTO user) {
         if (user == null) {
             return ResponseEntity.badRequest().build();
@@ -61,7 +64,7 @@ public class UserController {
         return ResponseEntity.ok(convert.toDTOCreateUser(userService.createUser(convert.toModelCreateUser(user))));
     }
 
-    @PutMapping("path/{id}")
+    @PutMapping("/{id}")
     public ResponseEntity<UserDTO> putMethodName(@PathVariable Long id, @RequestBody CreateUserDTO user) {
 
         User u = userService.getUser(id);
@@ -73,7 +76,7 @@ public class UserController {
     }
 
 
-    @DeleteMapping ("/delete/{id}")
+    @DeleteMapping ("/{id}")
     public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
         boolean deleted = userService.deleteUser(id);
 
