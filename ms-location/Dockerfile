@@ -22,4 +22,7 @@ COPY --from=build /app/target/*.jar app.jar
 # Port REST de MS-Location (documentaire : il n'est pas publié sur l'hôte en Compose)
 EXPOSE 8082
 
+# Définition du fuseau horaire pour les dates (UTC+2)
+ENV TZ=Europe/Paris
+
 ENTRYPOINT ["java", "-jar", "app.jar"]
