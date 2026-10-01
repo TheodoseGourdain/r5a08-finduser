@@ -1,0 +1,81 @@
+services:
+
+  api-gateway:
+    build: ./api-gateway
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - ms-user
+      - ms-location
+    networks:
+      - gateway-net
+
+  ms-user:
+    build: ./ms-user
+    container_name: ms-user
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://user-db:5432/userdb
+      SPRING_DATASOURCE_USERNAME: user
+      SPRING_DATASOURCE_PASSWORD: user
+    depends_on:
+      - user-db
+    networks:
+      - gateway-net
+      - internal-net
+      - user-db-net
+
+  ms-location:
+    build: ./ms-location
+    container_name: ms-location
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://location-db:5432/locationdb
+      SPRING_DATASOURCE_USERNAME: location
+      SPRING_DATASOURCE_PASSWORD: location
+
+      # connexion gRPC vers MS-User
+      USER_GRPC_HOST: ms-user
+      USER_GRPC_PORT: 9090
+    depends_on:
+      - location-db
+      - ms-user
+    networks:
+      - gateway-net
+      - internal-net
+      - location-db-net
+
+  user-db:
+    image: postgres:16
+    container_name: user-db
+    environment:
+      POSTGRES_DB: userdb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: user
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+    networks:
+      - user-db-net
+
+  location-db:
+    image: postgres:16
+    container_name: location-db
+    environment:
+      POSTGRES_DB: locationdb
+      POSTGRES_USER: location
+      POSTGRES_PASSWORD: location
+    volumes:
+      - location-db-data:/var/lib/postgresql/data
+    networks:
+      - location-db-net
+
+
+networks:
+  gateway-net:
+  internal-net:
+  user-db-net:
+  location-db-net:
+
+
+volumes:
+  user-db-data:
+  location-db-data:
