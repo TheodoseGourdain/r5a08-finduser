@@ -17,3 +17,25 @@ spring:
               uri: ${MS_LOCATION_URI:http://localhost:8082}
               predicates:
                 - Path=/locations/**
+
+            # Spécifications OpenAPI de chaque microservice
+            - id: ms-user-docs
+              uri: ${MS_USER_URI:http://localhost:8081}
+              predicates:
+                - Path=/docs/users
+              filters:
+                - SetPath=/v3/api-docs
+            - id: ms-location-docs
+              uri: ${MS_LOCATION_URI:http://localhost:8082}
+              predicates:
+                - Path=/docs/locations
+              filters:
+                - SetPath=/v3/api-docs
+
+springdoc:
+  swagger-ui:
+    urls:
+      - name: MS-User
+        url: /docs/users
+      - name: MS-Location
+        url: /docs/locations

@@ -2,6 +2,7 @@ package r5a08.finduser.ms_user.controller;
 
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -12,6 +13,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import r5a08.finduser.ms_user.convert.Convert;
 import r5a08.finduser.ms_user.dto.CreateUserDTO;
@@ -25,10 +29,13 @@ public class UserController {
 
     private final Convert convert;
     private final UserService userService;
+    private final RestClient locationClient;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService,
+                      @Value("${ms-location.uri}") String msLocationUri) {
         this.userService = userService;
         this.convert = new Convert();
+        this.locationClient = RestClient.create(msLocationUri);
     }
 
     /** GET /users */
@@ -67,12 +74,25 @@ public class UserController {
         return ResponseEntity.ok(convert.toDTOCreateUser(updated));
     }
 
-    /** DELETE /users/{id} : 204, ou 404 si l'utilisateur n'existe pas */
+    /**
+     * DELETE /users/{id} : 204, 404 si l'utilisateur n'existe pas,
+     * 503 si MS-Location est injoignable (l'utilisateur n'est alors pas supprimé).
+     */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
-        if (!userService.deleteUser(id)) {
+        if (userService.getUser(id) == null) {
             return ResponseEntity.notFound().build();
         }
+        try {
+            locationClient.delete()
+                    .uri("/internal/users/{userId}/locations", id)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException exception) {
+            // MS-Location injoignable ou en erreur : on ne supprime pas l'utilisateur
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
+        userService.deleteUser(id);
         return ResponseEntity.noContent().build();
     }
 }
