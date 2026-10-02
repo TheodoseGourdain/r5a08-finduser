@@ -15,8 +15,8 @@ import java.time.LocalDateTime;
  */
 public record LocationRequest(
 
-        @NotBlank(message = "L'identifiant de l'utilisateur est obligatoire.")
-        String userId,
+        @NotNull(message = "L'identifiant de l'utilisateur est obligatoire.")
+        Long userId,
 
         @NotNull(message = "La latitude est obligatoire.")
         @DecimalMin(value = "-90.0", message = "La latitude doit être supérieure ou égale à -90.")
