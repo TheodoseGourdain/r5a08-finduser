@@ -47,7 +47,7 @@ public class LocationService {
 
     /** GET /locations?userId=... */
     @Transactional(readOnly = true)
-    public List<LocationResponse> getLocationsByUserId(String userId) {
+    public List<LocationResponse> getLocationsByUserId(Long userId) {
         this.checkUser(userId);
         List<Location> locations = this.locationRepository.findByUserId(userId);
 
@@ -95,8 +95,14 @@ public class LocationService {
         this.locationRepository.delete(location);
     }
 
+    /** DELETE /locations?userId={id} */
+    @Transactional
+    public void deleteLocationsByUserId(Long userId) {
+        this.locationRepository.deleteByUserId(userId);
+    }
+
     /** Méthode utilitaire : lever l'exception « utilisateur introuvable » si besoin. */
-    private void checkUser(String userId) {
+    private void checkUser(Long userId) {
         if (!this.userVerifier.userExists(userId)) {
             throw new UserNotFoundException(userId);
         }

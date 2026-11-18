@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
  */
 public record LocationResponse(
         Long id,
-        String userId,
+        Long userId,
         Double latitude,
         Double longitude,
         LocalDateTime dateHeure,

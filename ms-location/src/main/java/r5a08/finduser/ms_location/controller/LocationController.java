@@ -53,7 +53,7 @@ public class LocationController {
     })
     public List<LocationResponse> getLocations(
             @Parameter(description = "Identifiant de l'utilisateur pour filtrer les résultats", example = "2")
-            @RequestParam(required = false) String userId) {
+            @RequestParam(required = false) Long userId) {
         if (userId == null) {
             return this.locationService.getAllLocations();
         }

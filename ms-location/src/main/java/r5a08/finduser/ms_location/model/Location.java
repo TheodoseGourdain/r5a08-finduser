@@ -12,7 +12,7 @@ public class Location {
     private Long id;
 
     @Column(nullable = false)
-    private String userId;
+    private Long userId;
 
     @Column(nullable = false)
     private Double latitude;
@@ -30,7 +30,7 @@ public class Location {
         // requis par JPA
     }
 
-    public Location(String userId, Double latitude, Double longitude, LocalDateTime dateHeure, String nom) {
+    public Location(Long userId, Double latitude, Double longitude, LocalDateTime dateHeure, String nom) {
         this.setUserId(userId);
         this.setLatitude(latitude);
         this.setLongitude(longitude);
@@ -42,7 +42,7 @@ public class Location {
         return this.id;
     }
 
-    public String getUserId() {
+    public Long getUserId() {
         return this.userId;
     }
 
@@ -63,8 +63,8 @@ public class Location {
     }
 
     // Setter privé, uniquement utilisé pour le constructeur
-    private void setUserId(String userId) {
-        if (userId == null || userId.isBlank()) {
+    private void setUserId(Long userId) {
+        if (userId == null) {
             throw new IllegalArgumentException("L'identifiant d'un utilisateur d'une localisation ne peut pas être vide.");
         }
         this.userId = userId;

@@ -1,191 +1,232 @@
-# FindUser — application User/Location
+# R5.A.08 - Qualité de développement
+# TP2 - Implémentation de microservices
 
-BUT 3 — R5.A.08 Qualité de développement — TP « Implémentation de microservices : REST, gRPC et API Gateway ».
+Théodose GOURDAIN et Clovis SANCEO 3A2
 
-> Ce README documente pour l'instant **MS-Location**. Les sections MS-User, API Gateway et Docker Compose seront ajoutées ensuite.
+Backend composé de deux microservices Spring Boot, chacun avec sa propre base PostgreSQL (*Database per Service*), derrière une API Gateway. MS-Location vérifie l'existence des utilisateurs auprès de MS-User par un appel **gRPC** interne, qui ne passe jamais par la Gateway.
+
+## Architecture
+
+| Composant | Rôle | Port(s) dans le conteneur | Publié sur l'hôte |
+|---|---|---|---|
+| `api-gateway` | Point d'entrée unique, routage (aucune logique métier) | 8080 | **oui** (seul) |
+| `ms-user` | Comptes utilisateurs, serveur gRPC `UserService` | 8081 (REST), 9090 (gRPC) | non |
+| `ms-location` | Localisations GPS, client gRPC de MS-User | 8082 | non |
+| `user-db` | PostgreSQL de MS-User | 5432 | non |
+| `location-db` | PostgreSQL de MS-Location | 5432 | non |
+
+## Lancer le projet
+
+Depuis la racine du projet, à côté du fichier `docker-compose.yml` :
+
+```bash
+docker compose up --build -d
+```
+
+Toutes les requêtes passent par `http://localhost:8080`.
+
+| Ressource | URL |
+|---|---|
+| API Users | `http://localhost:8080/users` |
+| API Locations | `http://localhost:8080/locations` |
+| Documentation Open API | `http://localhost:8080/swagger-ui.html` |
+
+Arrêt : `docker compose down` (ajouter `-v` pour supprimer les données des bases).
+
+
+## MS-User
+
+### Modèle
+
+| Champ | Type | Description |
+|---|---|---|
+| `id` | `Long` | Identifiant unique généré par la base |
+| `prenom` | `String` | Prénom de l'utilisateur |
+| `nom` | `String` | Nom de l'utilisateur |
+| `email` | `String` | Email unique de l'utilisateur |
+| `password` | `String` | Mot de passe haché (BCrypt), **jamais renvoyé** dans les réponses |
+
+### Routes
+
+| Méthode | Route | Rôle | Succès | Erreurs |
+|---|---|---|---|---|
+| `POST` | `/users` | Créer un utilisateur | 201 | 400 |
+| `GET` | `/users` | Lister les utilisateurs | 200 | — |
+| `GET` | `/users/{id}` | Lire un utilisateur | 200 | 404 |
+| `PUT` | `/users/{id}` | Modifier un utilisateur | 200 | 404 |
+| `DELETE` | `/users/{id}` | Supprimer un utilisateur **et ses localisations** | 204 | 404, 503 |
+
+Exemple de corps pour `POST /users` :
+
+```json
+{
+  "prenom": "Clovis",
+  "nom": "Sancéo",
+  "email": "clovis.sanceo@example.com",
+  "password": "jesuisunmotdepasse"
+}
+```
+
+### Suppression en cascade
+
+Chaque microservice ayant sa propre base, il n'existe pas de clé étrangère entre utilisateurs et localisations. La suppression est donc orchestrée par MS-User :
+
+1. Vérifier que l'utilisateur existe (sinon 404) ;
+2. Appeler la route interne de MS-Location `DELETE /interne/users/{id}/locations` ;
+3. Si l'appel réussit, supprimer l'utilisateur ; sinon renvoyer une **503** sans rien supprimer.
+
+Supprimer les localisations **avant** l'utilisateur garantit qu'un échec ne laisse jamais de localisations orphelines, et la requête peut être rejouée sans risque. La route interne n'est pas routée par la Gateway : elle est inaccessible depuis l'extérieur.
+
+### Serveur gRPC
+
+MS-User expose `UserService.GetUser` sur le port 9090 (contrat `user.proto`, voir plus bas). La réflexion gRPC est active, ce qui permet d'utiliser `grpcurl` sans fournir le `.proto`.
 
 ---
 
 ## MS-Location
 
-Microservice de gestion des localisations GPS des utilisateurs. Il possède sa propre base de données (**Location-DB**, pattern *Database per Service*) et vérifie l'existence des utilisateurs auprès de **MS-User** par un appel **gRPC** interne.
+### Modèle
 
-### Stack technique
+| Champ | Type | Description |
+|---|---|---|
+| `id` | `Long` | Identifiant unique généré par la base |
+| `userId` | `Long` | Identifiant de l'utilisateur (relié à MS-User), non modifiable après création |
+| `latitude` | `Double` | Entre -90 et 90 |
+| `longitude` | `Double` | Entre -180 et 180 |
+| `dateHeure` | `LocalDateTime` | Date de l'enregistrement, non dans le futur (colonne `date_heure`) |
+| `nom` | `String` | Nom de la localisation, non vide |
 
-| Élément | Version / choix |
-|---|---|
-| Spring Boot | 4.1.1 |
-| Java | 17 (compilation), exécuté en 21 |
-| Base de données | PostgreSQL 16 |
-| ORM | Spring Data JPA / Hibernate 7 |
-| Client gRPC | `spring-boot-starter-grpc-client` (génération des stubs via `protobuf-maven-plugin`) |
-| Documentation | springdoc-openapi 3.1.0 (Swagger UI) |
-| Build | Maven Wrapper (`./mvnw`) |
-
-### Organisation du code
-
-```
-r5a08.finduser.ms_location
-├── config/        GrpcClientConfig          stub client gRPC vers MS-User
-├── controller/    LocationController        routes REST + documentation OpenAPI
-├── dto/           LocationRequest           corps du POST
-│                  LocationPutRequest        corps du PUT
-│                  LocationPatchRequest      corps du PATCH
-│                  LocationResponse          réponse de toutes les routes
-├── exception/     LocationNotFoundException
-│                  UserNotFoundException
-│                  UserServiceUnavailableException
-│                  GlobalExceptionHandler    exceptions → réponses HTTP (RFC 9457)
-├── model/         Location                  entité JPA
-├── repository/    LocationRepository        Spring Data JPA
-├── service/       LocationService           logique métier
-└── user/          UserVerifier              contrat « l'utilisateur existe-t-il ? »
-                   GrpcUserVerifier          implémentation gRPC
-src/main/proto/    user.proto                contrat gRPC partagé avec MS-User
-```
-
-### API REST
-
-Préfixe : `/locations`. Port local : **8082**.
+### Routes
 
 | Méthode | Route | Rôle | Succès | Erreurs |
 |---|---|---|---|---|
-| `GET` | `/locations` | Lister toutes les localisations (triées par id) | 200 | — |
-| `GET` | `/locations?userId=…` | Lister les localisations d'un utilisateur | 200 | 404 utilisateur, 503 |
+| `POST` | `/locations` | Enregistrer une localisation (vérifie l'utilisateur en gRPC) | 201 | 400, 404, 503 |
+| `GET` | `/locations` | Lister toutes les localisations | 200 | — |
 | `GET` | `/locations/{id}` | Lire une localisation | 200 | 404 |
-| `POST` | `/locations` | Enregistrer une localisation | 201 | 400, 404 utilisateur, 503 |
-| `PUT` | `/locations/{id}` | Remplacer une localisation | 200 | 400, 404 |
-| `PATCH` | `/locations/{id}` | Modifier partiellement une localisation | 200 | 400, 404 |
+| `GET` | `/locations?userId=…` | Lister les localisations d'un utilisateur (vérifie l'utilisateur en gRPC) | 200 | 404, 503 |
+| `PUT` | `/locations/{id}` | Remplacer une localisation (sauf `userId`) | 200 | 400, 404 |
 | `DELETE` | `/locations/{id}` | Supprimer une localisation | 204 | 404 |
+| `DELETE` | `/interne/users/{id}/locations` | Supprimer toutes les localisations d'un utilisateur — **route interne, non exposée** | 204 | — |
 
-Les routes `PUT`, `PATCH` et `DELETE` vont au-delà du sujet (qui demande `POST`, `GET /{id}` et `GET ?userId=`).
-
-Exemple de corps pour `POST` :
+Exemple de corps pour `POST /locations` :
 
 ```json
 {
-  "userId": "1",
+  "userId": 1,
   "latitude": 47.6582,
   "longitude": -2.7608,
-  "dateHeure": "2026-09-30T10:00:00",
+  "dateHeure": "2026-10-01T10:00:00",
   "nom": "IUT de Vannes"
 }
 ```
 
-Documentation interactive : `http://localhost:8082/swagger-ui.html` — spécification : `http://localhost:8082/v3/api-docs` (importable dans Postman).
+## Communication gRPC
 
-### Choix de conception
+Contrat partagé, identique dans `ms-user/src/main/proto/` et `ms-location/src/main/proto/` :
 
-- **`userId` sans relation JPA.** Les utilisateurs vivent dans une autre base : l'entité ne stocke que l'identifiant. L'intégrité est assurée par l'appel gRPC à MS-User lors de la création.
-- **`userId` non modifiable.** Une localisation enregistre un fait (« tel utilisateur était à tel endroit ») : la réattribuer n'a pas de sens et compliquerait l'autorisation (TP5). Le setter est privé et le champ est absent des DTO `PUT` et `PATCH`. Conséquence : ces deux routes n'appellent pas MS-User.
-- **`PUT` ≠ `PATCH`.** `PUT` remplace la ressource entière (tous les champs obligatoires) ; `PATCH` ne modifie que les champs fournis (un champ absent n'est pas modifié).
-- **DTO séparés de l'entité.** Le contrat JSON est indépendant du modèle JPA ; le client ne peut ni fixer ni modifier l'`id`.
-- **Double validation.** Les DTO valident l'entrée (`@Valid`, erreurs 400 détaillées) ; les setters de l'entité garantissent qu'elle reste toujours valide.
-- **`GET ?userId=` vérifie l'utilisateur.** Un utilisateur inexistant donne une 404, ce qui le distingue d'un utilisateur existant sans localisation (liste vide).
-- **Abstraction `UserVerifier`.** Le service ne dépend que de l'interface, pas de gRPC. Un bouchon a permis de développer MS-Location avant que MS-User soit prêt ; il a été supprimé à l'arrivée de `GrpcUserVerifier`.
+```protobuf
+syntax = "proto3";
 
-### Gestion des erreurs
+option java_multiple_files = true;
+option java_package = "r5a08.finduser.grpc.user";
 
-Les erreurs sont renvoyées au format `application/problem+json` (RFC 9457, classe `ProblemDetail`).
+service UserService {
+  rpc GetUser (UserRequest) returns (UserReply);
+}
 
-| Cause | Code | Exemple de `detail` |
-|---|---|---|
-| Localisation inexistante | 404 | « La localisation 114 n'existe pas. » |
-| Utilisateur inexistant (`exists = false`) | 404 | « L'utilisateur 9999 n'existe pas. » |
-| Validation `@Valid` échouée | 400 | « Données invalides » + objet `errors` par champ |
-| Valeur refusée par un setter | 400 | message du setter |
-| MS-User injoignable ou trop lent | 503 | « Le service utilisateurs est indisponible (gRPC : UNAVAILABLE). » |
+message UserRequest {
+  string id = 1;
+}
 
-### Communication gRPC avec MS-User
-
-- **Contrat** : `user.proto` (`UserService.GetUser`), identique dans MS-User et MS-Location, `java_package = "r5a08.finduser.grpc.user"`.
-- **Canal** : `spring.grpc.client.channel.user-service.target` (propriété Spring Boot 4.1).
-- **Délai** : chaque appel est limité à **2 secondes** (`withDeadlineAfter`).
-- **Traduction des statuts gRPC** :
-  - `exists = false` ou statut `NOT_FOUND` → 404 ;
-  - tout autre statut (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, …) → 503.
-
-### Configuration
-
-Les adresses sont paramétrables par variables d'environnement ; les valeurs par défaut correspondent à l'environnement local.
-
-| Variable | Défaut (local) | Valeur prévue en Docker |
-|---|---|---|
-| `DB_URL` | `jdbc:postgresql://localhost:5433/locationdb` | `jdbc:postgresql://location-db:5432/locationdb` |
-| `DB_USERNAME` | `location` | identique |
-| `DB_PASSWORD` | `location` | identique |
-| `USER_SERVICE_GRPC_TARGET` | `localhost:9090` | `ms-user:9090` |
-
-### Lancer en local
-
-```bash
-# Base Location-DB (première fois)
-docker run -d --name location-db-dev -p 5433:5432 \
-  -e POSTGRES_DB=locationdb -e POSTGRES_USER=location -e POSTGRES_PASSWORD=location \
-  postgres:16
-
-# Les fois suivantes
-docker start location-db-dev
-
-# Application (depuis ms-location/)
-./mvnw spring-boot:run
+message UserReply {
+  string id = 1;
+  string nom = 2;
+  string prenom = 3;
+  bool exists = 4;
+}
 ```
 
-MS-User doit tourner (gRPC sur `localhost:9090`) pour les routes qui vérifient l'utilisateur.
+## API Gateway
 
-> Toujours utiliser `./mvnw` et non `mvn` : le plugin protobuf exige Maven ≥ 3.9.6.
-> `./mvnw package` lance le test `contextLoads()`, qui nécessite la base démarrée.
+| Routes | Destination |
+|---|---|
+| `/users/**` | MS-User |
+| `/locations/**` | MS-Location |
+| `/docs/users` | spécification OpenAPI de MS-User |
+| `/docs/locations` | spécification OpenAPI de MS-Location |
 
----
+La Gateway met à disposition un Swagger UI de Open API pour les deux APIs : `http://localhost:8080/swagger-ui/index.html`.
 
-## Tests réalisés
 
-Environnement : Location-DB (port 5433), User-DB (port 5432), MS-User (REST 8080, gRPC 9090), MS-Location (8082). Tests effectués le 30/09/2026.
+## Docker Compose
 
-### Préalable : MS-User
+### Réseaux
 
-| Test | Commande | Résultat |
+| Réseau | Services | Trafic |
 |---|---|---|
-| Création d'un utilisateur | `POST /users/create` (Alice Martin) | 200, id `1`, mot de passe absent de la réponse ✅ |
+| `gateway-net` | api-gateway, ms-user, ms-location | REST nord-sud |
+| `internal-net` | ms-user, ms-location | gRPC est-ouest, route interne de suppression |
+| `user-db-net` | ms-user, user-db | JDBC |
+| `location-db-net` | ms-location, location-db | JDBC |
 
-### gRPC seul (grpcurl sur MS-User)
+Seul le port **8080** de la Gateway est publié sur l'hôte. Les bases disposent d'un `healthcheck` (`pg_isready`) : les microservices ne démarrent qu'une fois leur base prête.
 
-| Test | Commande | Résultat |
+### Variables d'environnement
+
+| Service | Variable | Valeur |
 |---|---|---|
-| Services exposés | `grpcurl -plaintext localhost:9090 list` | `UserService`, `grpc.health.v1.Health`, `grpc.reflection.v1.ServerReflection` ✅ |
-| Utilisateur existant | `grpcurl -plaintext -d '{"id": "1"}' localhost:9090 UserService/GetUser` | `exists: true`, nom et prénom renvoyés ✅ |
-| Utilisateur inexistant | `grpcurl -plaintext -d '{"id": "9999"}' localhost:9090 UserService/GetUser` | seul l'`id` est renvoyé ✅ |
+| api-gateway | `MS_USER_URI` | `http://ms-user:8081` |
+| api-gateway | `MS_LOCATION_URI` | `http://ms-location:8082` |
+| ms-user | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://user-db:5432/userdb` |
+| ms-user | `MS_LOCATION_URI` | `http://ms-location:8082` |
+| ms-location | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://location-db:5432/locationdb` |
+| ms-location | `USER_SERVICE_GRPC_TARGET` | `ms-user:9090` |
 
-En proto3, les champs à leur valeur par défaut (`false`) ne sont pas affichés : l'absence de `exists` signifie `exists: false`.
+Hors Docker, chaque application utilise des valeurs par défaut pointant vers `localhost`.
 
-### MS-Location avec MS-User démarré
+## Tests (exercice 5)
 
-| Test | Requête | Attendu | Obtenu |
-|---|---|---|---|
-| Création pour un utilisateur existant | `POST /locations` (`userId` `1`) | 201 | 201 ✅ |
-| Création pour un utilisateur inexistant | `POST /locations` (`userId` `9999`) | 404 | 404 « Utilisateur introuvable » ✅ |
-| Filtre sur un utilisateur existant | `GET /locations?userId=1` | 200 | 200, liste de ses localisations ✅ |
-| Filtre sur un utilisateur inexistant | `GET /locations?userId=9999` | 404 | 404 ✅ |
-| Localisation inexistante | `GET /locations/114` | 404 | 404 « Localisation introuvable » ✅ |
-| Données invalides | `POST` avec `latitude: 200` et sans `nom` | 400 | 400 avec les deux messages dans `errors` ✅ |
-| Modification partielle | `PATCH /locations/2` (`nom` seul) | 200 | 200, seul le nom modifié ✅ |
-| Remplacement | `PUT /locations/{id}` | 200 | à rejouer avec gRPC |
-| Suppression | `DELETE /locations/{id}` | 204 | à rejouer avec gRPC |
+Tests réalisés en Docker Compose, sur des bases neuves, via la Gateway (`localhost:8080`).
 
-### MS-Location avec MS-User arrêté
+### 1. REST via la Gateway (Postman)
 
-| Test | Requête | Attendu | Obtenu |
-|---|---|---|---|
-| Création | `POST /locations` | 503 | 503 « Service utilisateurs indisponible (gRPC : UNAVAILABLE) » ✅ |
-| Liste complète | `GET /locations` | 200 | 200 ✅ |
-| Modification partielle | `PATCH /locations/2` | 200 | 200 ✅ |
+| Requête | Attendu | Obtenu |
+|---|---|---|
+| `POST /users` (Clovis Sancéo) | 201, mot de passe absent | 201 |
+| `POST /locations` (`userId` 1) | 201 | 201 |
 
----
+**Capture 1 — Postman : création d'un utilisateur**
 
-## Éléments pour la discussion (section 7 du sujet)
+![Postman — POST /users](captures/postman-user.png)
 
-**Couplage temporel.** L'appel gRPC étant synchrone, MS-Location ne peut plus créer de localisations (ni filtrer par utilisateur) quand MS-User est arrêté : le test ci-dessus renvoie une 503. Le délai de 2 secondes et la traduction en 503 évitent un blocage indéfini ou une 500, mais n'isolent pas la panne. Par ailleurs, avec `@Transactional`, une connexion à la base est réservée pendant l'appel gRPC : si MS-User répond lentement, les connexions s'accumulent. Les routes qui n'appellent pas MS-User (`GET`, `PUT`, `PATCH`, `DELETE`) restent disponibles. Le TP3 (Kafka) permettra de réduire ce couplage.
+**Capture 2 — Postman : création d'une localisation pour cet utilisateur**
 
-**Sécurité.** Aucun contrôle d'accès pour l'instant. Proposition : l'**authentification** (vérification d'un jeton émis par Keycloak) peut se faire dès la Gateway ; l'**autorisation** (« cette localisation appartient-elle à l'appelant ? ») ne peut se faire que dans MS-Location, seul à connaître les données. Le `userId` non modifiable simplifie cette règle. Envoyer un mot de passe à chaque requête est à exclure : MS-Location manipulerait des identifiants qui ne le concernent pas.
+![Postman — POST /locations](captures/postman-location.png)
 
-**Évolution du contrat gRPC.** *(à rédiger)* Piste : protobuf ignore les champs inconnus. Si un champ est ajouté à `UserReply` sans régénérer les stubs de MS-Location, celui-ci continue de fonctionner et ignore simplement le nouveau champ — illustration du lecteur tolérant (loi de Postel). En revanche, renuméroter ou changer le type d'un champ existant casserait la compatibilité.
+### 2. gRPC isolé (grpcurl)
+
+```bash
+grpcurl -plaintext -d '{"id": "1"}' localhost:9090 UserService/GetUser
+```
+
+Résultat : `exists: true`, avec l'identifiant, le nom et le prénom.
+
+**Capture 3 — grpcurl : appel direct à MS-User**
+
+![grpcurl — UserService/GetUser](captures/grpcurl.png)
+
+### 3. Cas d'erreur
+
+| Requête | Attendu | Obtenu |
+|---|---|---|
+| `POST /locations` (`userId` 114) | 404, pas de 500 | 404 « L'utilisateur 114 n'existe pas. » |
+
+**Capture 4 — curl : POST avec utilisateur inexistant**
+
+![grpcurl — UserService/GetUser](captures/cas-erreur.png)
+
+## Points de vigilance et discussion
+
+### Évolution du contrat gRPC
+
+Si un champ est ajouté à UserReply sans régénérer les stubs de MS-Location, il n’y a pas d’erreur qui est déclenchée. MS-Location continue de fonctionner et ignore le nouveau champ. En revanche, si on régénère ses stubs, cela déclenche une erreur car MS-Location veut un champ qui n’est pas disponible. Même chose si on change le type d’un champ existant.
