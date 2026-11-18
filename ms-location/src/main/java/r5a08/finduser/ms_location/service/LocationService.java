@@ -13,6 +13,7 @@ import r5a08.finduser.ms_location.repository.LocationRepository;
 import r5a08.finduser.ms_location.user.UserVerifier;
 import r5a08.finduser.ms_location.exception.UserNotFoundException;
 import r5a08.finduser.ms_location.exception.LocationNotFoundException;
+import r5a08.finduser.ms_location.event.LocationEventPublisher;
 
 import java.util.List;
 
@@ -21,10 +22,13 @@ public class LocationService {
 
     private final LocationRepository locationRepository;
     private final UserVerifier userVerifier;
+    private final LocationEventPublisher locationEventPublisher;
 
-    public LocationService(LocationRepository locationRepository, UserVerifier userVerifier) {
+    public LocationService(LocationRepository locationRepository, UserVerifier userVerifier,
+                           LocationEventPublisher locationEventPublisher) {
         this.locationRepository = locationRepository;
         this.userVerifier = userVerifier;
+        this.locationEventPublisher = locationEventPublisher;
     }
 
     /** GET /locations */
@@ -56,12 +60,12 @@ public class LocationService {
                 .toList();
     }
 
-    /** POST /locations : vérifier l'utilisateur, puis enregistrer. */
+    /** POST /locations : vérifier l'utilisateur, enregistrer, puis publier l'événement. */
     @Transactional
     public LocationResponse addLocation(LocationRequest request) {
         this.checkUser(request.userId());
-    
         Location saved = this.locationRepository.save(request.toEntity());
+        this.locationEventPublisher.publishLocationUpdated(saved);
         return LocationResponse.fromEntity(saved);
     }
 
