@@ -1,10 +1,10 @@
 services:
-
+  # API GATEWAY (EXISTANT)
   api-gateway:
     build: ./api-gateway
     container_name: api-gateway
     ports:
-      - "8080:8080"            # seul port publié sur l'hôte
+      - "8080:8080"            # point d'entrée REST
     environment:
       MS_USER_URI: http://ms-user:8081
       MS_LOCATION_URI: http://ms-location:8082
@@ -14,6 +14,7 @@ services:
     networks:
       - gateway-net
 
+  # MS-USER (EXISTANT)
   ms-user:
     build: ./ms-user
     container_name: ms-user
@@ -30,6 +31,7 @@ services:
       - internal-net           # trafic est-ouest (gRPC depuis MS-Location)
       - user-db-net
 
+  # MS-LOCATION (MODIFIÉ)
   ms-location:
     build: ./ms-location
     container_name: ms-location
@@ -39,16 +41,21 @@ services:
       SPRING_DATASOURCE_PASSWORD: location
       # connexion gRPC vers MS-User (réseau internal-net)
       USER_SERVICE_GRPC_TARGET: ms-user:9090
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       location-db:
         condition: service_healthy
       ms-user:
         condition: service_started
+      kafka:
+        condition: service_started
     networks:
       - gateway-net
       - internal-net
       - location-db-net
+      - backend
 
+  # POSTGRESQL USER (EXISTANT)
   user-db:
     image: postgres:16
     container_name: user-db
@@ -66,6 +73,7 @@ services:
     networks:
       - user-db-net
 
+  # POSTGRESQL LOCATION (EXISTANT)
   location-db:
     image: postgres:16
     container_name: location-db
@@ -83,12 +91,92 @@ services:
     networks:
       - location-db-net
 
+  # NOUVEAU : KAFKA
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    ports:
+      - '29092:29092'
+    environment:
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - backend
+
+  # NOUVEAU : REDIS
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
+
+  # NOUVEAU : MAILPIT
+  mailpit:
+    image: axllent/mailpit
+    container_name: mailpit
+    ports:
+      - '8025:8025'
+      - '1025:1025'
+    networks:
+      - backend
+
+  # NOUVEAU : MS-NOTIFICATION
+  ms-notification:
+    build: ./ms-notification
+    container_name: ms-notification
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      ADMIN_EMAIL: admin@example.com
+    depends_on:
+      - kafka
+      - mailpit
+    networks:
+      - backend
+
+  # NOUVEAU : MS-PROXIMITY-DETECTION
+  # Service développé par ton binôme
+  ms-proximity-detection:
+    build: ./ms-proximity-detection
+    container_name: ms-proximity-detection
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      - kafka
+      - redis
+    networks:
+      - backend
+
 networks:
   gateway-net:
   internal-net:
   user-db-net:
   location-db-net:
 
+  # Nouveau réseau partagé
+  backend:
+
 volumes:
   user-db-data:
   location-db-data:
+
+  # Nouveaux volumes
+  kafka-data:
+  redis-data:

@@ -41,7 +41,7 @@ public class GrpcUserVerifier implements UserVerifier {
                     .getUser(request);
             log.info("gRPC GetUser(id={}) -> exists={}", userId, reply.getExists());
             return reply.getExists();
-        
+
         } catch (StatusRuntimeException exception) {
             // Si MS-User signale l'absence par un statut NOT_FOUND plutôt que par exists = false
             if (exception.getStatus().getCode() == Status.Code.NOT_FOUND) {
