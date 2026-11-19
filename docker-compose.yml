@@ -1,10 +1,10 @@
 services:
-
+  # API GATEWAY
   api-gateway:
     build: ./api-gateway
     container_name: api-gateway
     ports:
-      - "8080:8080"            # seul port publié sur l'hôte
+      - "8080:8080"            # point d'entrée REST
     environment:
       MS_USER_URI: http://ms-user:8081
       MS_LOCATION_URI: http://ms-location:8082
@@ -14,6 +14,7 @@ services:
     networks:
       - gateway-net
 
+  # MS-USER
   ms-user:
     build: ./ms-user
     container_name: ms-user
@@ -30,6 +31,7 @@ services:
       - internal-net           # trafic est-ouest (gRPC depuis MS-Location)
       - user-db-net
 
+  # MS-LOCATION
   ms-location:
     build: ./ms-location
     container_name: ms-location
@@ -39,16 +41,21 @@ services:
       SPRING_DATASOURCE_PASSWORD: location
       # connexion gRPC vers MS-User (réseau internal-net)
       USER_SERVICE_GRPC_TARGET: ms-user:9090
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       location-db:
         condition: service_healthy
       ms-user:
         condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
     networks:
       - gateway-net
       - internal-net
       - location-db-net
+      - backend
 
+  # POSTGRESQL USER
   user-db:
     image: postgres:16
     container_name: user-db
@@ -66,6 +73,7 @@ services:
     networks:
       - user-db-net
 
+  # POSTGRESQL LOCATION
   location-db:
     image: postgres:16
     container_name: location-db
@@ -83,12 +91,122 @@ services:
     networks:
       - location-db-net
 
+  # KAFKA (mode KRaft, sans Zookeeper)
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    ports:
+      - "29092:29092"          # accès depuis l'hôte (IDE, outils CLI) : localhost:29092
+    environment:
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      # Kafka est prêt quand il répond à une requête d'administration
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    networks:
+      - backend
+
+  # CRÉATION DES TOPICS (s'exécute une fois puis s'arrête)
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic user.location.updated --partitions 1 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic proximity.violation.detected --partitions 1 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:9092 --list
+    networks:
+      - backend
+
+  # REDIS (règles de proximité)
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  # MAILPIT (serveur SMTP de test, interface web sur http://localhost:8025)
+  mailpit:
+    image: axllent/mailpit
+    container_name: mailpit
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    networks:
+      - backend
+
+  # MS-NOTIFICATION : consomme proximity.violation.detected, envoie les emails
+  ms-notification:
+    build: ./ms-notification
+    container_name: ms-notification
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      ADMIN_EMAIL: admin@example.com
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    networks:
+      - backend
+
+  # MS-PROXIMITY-DETECTION : consomme user.location.updated, publie proximity.violation.detected
+  ms-proximity-detection:
+    build: ./ms-proximity-detection
+    container_name: ms-proximity-detection
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+
 networks:
   gateway-net:
   internal-net:
   user-db-net:
   location-db-net:
+  backend:                     # réseau partagé avec Kafka, Redis et Mailpit
 
 volumes:
   user-db-data:
   location-db-data:
+  kafka-data:
+  redis-data:

@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: ms-proximity-detection
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      # Identifiant du groupe de consommateurs : Kafka mémorise l'offset de ce groupe
+      group-id: ms-proximity-detection
+      # Au tout premier démarrage du groupe (aucun offset mémorisé), lire le topic depuis le début
+      auto-offset-reset: earliest
+    producer:
+      properties:
+        max.block.ms: 5000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+app:
+  kafka:
+    topics:
+      location-updated: user.location.updated
+      proximity-violation: proximity.violation.detected

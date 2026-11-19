@@ -8,6 +8,9 @@ spring:
     gateway:
       server:
         webflux:
+          # Active les en-têtes X-Forwarded-* (désactivés par défaut depuis CVE-2025-41235).
+          # On fait confiance aux adresses locales et aux réseaux privés (Docker).
+          trusted-proxies: '127\.0\.0\.1|10\..*|172\..*|192\.168\..*'
           routes:
             - id: ms-user
               uri: ${MS_USER_URI:http://localhost:8081}
