@@ -7,6 +7,10 @@ Backend composé de deux microservices Spring Boot, chacun avec sa propre base P
 
 A cela s'ajoute une détection en temps quasi réel des violations de proximité entre utilisateurs devant rester éloignés. MS-Location publie chaque nouvelle position dans Kafka, MS-Proximity-Detection la compare aux règles stockées dans Redis et publie les violations, puis MS-Notification envoie un email à l'administrateur.
 
+## GitHub
+
+L'ensemble du code de ce projet est disponible dans un dépôt GitHub : https://github.com/TheodoseGourdain/r5a08-finduser.
+
 ## Architecture
 
 Les nouveaux services ne se connaissent pas entre eux : chacun ne connaît que les **topics** Kafka. MS-Location ignore l'existence de MS-Proximity-Detection, qui ignore celle de MS-Notification. Si MS-Notification est arrêté, les violations restent dans Kafka et sont traitées à son redémarrage.
